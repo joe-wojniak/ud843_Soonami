@@ -40,12 +40,17 @@ import java.text.SimpleDateFormat;
  */
 public class MainActivity extends AppCompatActivity {
 
-    /** Tag for the log messages */
+    /**
+     * Tag for the log messages
+     */
     public static final String LOG_TAG = MainActivity.class.getSimpleName();
 
-    /** URL to query the USGS dataset for earthquake information */
+    /**
+     * URL to query the USGS dataset for earthquake information
+     */
     private static final String USGS_REQUEST_URL =
-            "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=2012-01-01&endtime=2012-12-01&minmagnitude=6";
+            "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=2014-01-01&endtime=2014-12-01&minmagnitude=7";
+    // "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=2012-01-01&endtime=2012-12-01&minmagnitude=6";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -120,109 +125,124 @@ public class MainActivity extends AppCompatActivity {
 
             // Return the {@link Event} object as the result fo the {@link TsunamiAsyncTask}
             return earthquake;
-        }
 
-        /**
-         * Update the screen with the given earthquake (which was the result of the
-         * {@link TsunamiAsyncTask}).
-         */
-        @Override
-        protected void onPostExecute(Event earthquake) {
-            if (earthquake == null) {
-                return;
-            }
-
-            updateUi(earthquake);
-        }
-
-        /**
-         * Returns new URL object from the given string URL.
-         */
-        private URL createUrl(String stringUrl) {
-            URL url = null;
-            try {
-                url = new URL(stringUrl);
-            } catch (MalformedURLException exception) {
-                Log.e(LOG_TAG, "Error with creating URL", exception);
-                return null;
-            }
-            return url;
-        }
-
-        /**
-         * Make an HTTP request to the given URL and return a String as the response.
-         */
-        private String makeHttpRequest(URL url) throws IOException {
-            String jsonResponse = "";
-            HttpURLConnection urlConnection = null;
-            InputStream inputStream = null;
-            try {
-                urlConnection = (HttpURLConnection) url.openConnection();
-                urlConnection.setRequestMethod("GET");
-                urlConnection.setReadTimeout(10000 /* milliseconds */);
-                urlConnection.setConnectTimeout(15000 /* milliseconds */);
-                urlConnection.connect();
-                inputStream = urlConnection.getInputStream();
-                jsonResponse = readFromStream(inputStream);
-            } catch (IOException e) {
-                // TODO: Handle the exception
-            } finally {
-                if (urlConnection != null) {
-                    urlConnection.disconnect();
+            /**
+             * Update the screen with the given earthquake (which was the result of the
+             * {@link TsunamiAsyncTask}).
+             */
+            @Override
+            protected void onPostExecute (Event earthquake){
+                if (earthquake == null) {
+                    return;
                 }
-                if (inputStream != null) {
-                    // function must handle java.io.IOException here
-                    inputStream.close();
+
+                updateUi(earthquake);
+            }
+
+            /**
+             * Returns new URL object from the given string URL.
+             */
+            private URL createUrl(String stringUrl) {
+                URL url = null;
+                try {
+                    url = new URL(stringUrl);
+                } catch (MalformedURLException exception) {
+                    Log.e(LOG_TAG, "Error with creating URL", exception);
+                    return null;
+                }
+                return url;
+            }
+
+            /**
+             * Make an HTTP request to the given URL and return a String as the response.
+             */
+            int responseCode;
+
+            private String makeHttpRequest (URL url) throws IOException {
+                String jsonResponse = "";
+                HttpURLConnection urlConnection = null;
+                InputStream inputStream = null;
+                try {
+                    urlConnection = (HttpURLConnection) url.openConnection();
+                    urlConnection.setRequestMethod("GET");
+                    urlConnection.setReadTimeout(10000 /* milliseconds */);
+                    urlConnection.setConnectTimeout(15000 /* milliseconds */);
+                    urlConnection.connect();
+                    responseCode = urlConnection.getResponseCode();
+                    // If HTTP response code is 200 read & parse input stream
+                    // If HTTP response code is anything else, return empty string
+                    // for JSON reponse.
+                    switch (responseCode) {
+                        case 200:
+                            inputStream = urlConnection.getInputStream();
+                            jsonResponse = readFromStream(inputStream);
+                            break;
+                        default:
+                            jsonResponse = null;
+                            break;
+                        //inputStream = urlConnection.getInputStream();
+                        //jsonResponse = readFromStream(inputStream);
+                    } catch(IOException e){
+                        // TODO: Handle the exception
+                    } finally{
+                        if (urlConnection != null) {
+                            urlConnection.disconnect();
+                        }
+                        if (inputStream != null) {
+                            // function must handle java.io.IOException here
+                            inputStream.close();
+                        }
+                    }
+                    return jsonResponse;
+                }
+
+                /**
+                 * Convert the {@link InputStream} into a String which contains the
+                 * whole JSON response from the server.
+                 */
+                private String readFromStream (InputStream inputStream) throws IOException {
+                    StringBuilder output = new StringBuilder();
+                    if (inputStream != null) {
+                        InputStreamReader inputStreamReader = new InputStreamReader(inputStream, Charset.forName("UTF-8"));
+                        BufferedReader reader = new BufferedReader(inputStreamReader);
+                        String line = reader.readLine();
+                        while (line != null) {
+                            output.append(line);
+                            line = reader.readLine();
+                        }
+                    }
+                    return output.toString();
+                }
+
+                /**
+                 * Return an {@link Event} object by parsing out information
+                 * about the first earthquake from the input earthquakeJSON string.
+                 */
+                private Event extractFeatureFromJson (String earthquakeJSON){
+                    try {
+                        JSONObject baseJsonResponse = new JSONObject(earthquakeJSON);
+                        JSONArray featureArray = baseJsonResponse.getJSONArray("features");
+
+                        // If there are results in the features array
+                        if (featureArray.length() > 0) {
+                            // Extract out the first feature (which is an earthquake)
+                            JSONObject firstFeature = featureArray.getJSONObject(0);
+                            JSONObject properties = firstFeature.getJSONObject("properties");
+
+                            // Extract out the title, time, and tsunami values
+                            String title = properties.getString("title");
+                            long time = properties.getLong("time");
+                            int tsunamiAlert = properties.getInt("tsunami");
+
+                            // Create a new {@link Event} object
+                            return new Event(title, time, tsunamiAlert);
+                        }
+                    } catch (JSONException e) {
+                        Log.e(LOG_TAG, "Problem parsing the earthquake JSON results", e);
+                    }
+                    return null;
                 }
             }
-            return jsonResponse;
-        }
-
-        /**
-         * Convert the {@link InputStream} into a String which contains the
-         * whole JSON response from the server.
-         */
-        private String readFromStream(InputStream inputStream) throws IOException {
-            StringBuilder output = new StringBuilder();
-            if (inputStream != null) {
-                InputStreamReader inputStreamReader = new InputStreamReader(inputStream, Charset.forName("UTF-8"));
-                BufferedReader reader = new BufferedReader(inputStreamReader);
-                String line = reader.readLine();
-                while (line != null) {
-                    output.append(line);
-                    line = reader.readLine();
-                }
-            }
-            return output.toString();
-        }
-
-        /**
-         * Return an {@link Event} object by parsing out information
-         * about the first earthquake from the input earthquakeJSON string.
-         */
-        private Event extractFeatureFromJson(String earthquakeJSON) {
-            try {
-                JSONObject baseJsonResponse = new JSONObject(earthquakeJSON);
-                JSONArray featureArray = baseJsonResponse.getJSONArray("features");
-
-                // If there are results in the features array
-                if (featureArray.length() > 0) {
-                    // Extract out the first feature (which is an earthquake)
-                    JSONObject firstFeature = featureArray.getJSONObject(0);
-                    JSONObject properties = firstFeature.getJSONObject("properties");
-
-                    // Extract out the title, time, and tsunami values
-                    String title = properties.getString("title");
-                    long time = properties.getLong("time");
-                    int tsunamiAlert = properties.getInt("tsunami");
-
-                    // Create a new {@link Event} object
-                    return new Event(title, time, tsunamiAlert);
-                }
-            } catch (JSONException e) {
-                Log.e(LOG_TAG, "Problem parsing the earthquake JSON results", e);
-            }
-            return null;
         }
     }
 }
